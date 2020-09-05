@@ -9,10 +9,13 @@
 //! - All possible lossless conversions is possible by using `From`.
 //! - When `TryFrom` is stabilized fallible conversions will also be supported.
 
+#![allow(non_camel_case_types)]
 
 #![cfg_attr(not(feature="std"), no_std)]
 
-extern crate num_traits;
+pub mod traits;
+use crate::traits::*;
+mod macros;
 
 mod lib {
     pub mod core {
@@ -41,26 +44,15 @@ use lib::core::ops::{
 
 use lib::core::hash::{
     Hash,
-    Hasher,
 };
 
 use lib::core::cmp::{
-    Ordering,
     Ord,
     PartialOrd,
 };
 
-use lib::core::fmt::{
-    Display,
-    Formatter,
-    UpperHex,
-    LowerHex,
-    Octal,
-    Binary,
-};
-
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub struct Unsigned<const BITS: usize, T=usize>(T);
+#[derive(Debug, Default, Hash, Clone, Copy)]
+pub struct Unsigned<const BITS: usize, T=u128>(T);
 
 impl<const N: usize, T> Unsigned<N, T> {
     pub const unsafe fn new_unchecked(value: T) -> Self {
@@ -68,965 +60,795 @@ impl<const N: usize, T> Unsigned<N, T> {
     }
 }
 
-impl<const N: usize> Unsigned<N, usize> {
-    pub const MAX: Self = Self((1 << N)-1);
-    pub const MIN: Self = Self(0);
+#[derive(Debug, Default, Hash, Clone, Copy)]
+pub struct Signed<const BITS: usize, T=u128>(T);
 
-    const fn mask(self) -> Self {
-        Self(self.0 & ( (1usize << N).overflowing_sub(1).0))
-    }
-
-    /// Crates a new variable
-    ///
-    /// This function mainly exists as there is currently not a better way to construct these types.
-    /// May be deprecated or removed if a better way to construct these types becomes available.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// use ux::*;
-    ///
-    /// assert_eq!(uint::<31>::new(64), uint::<31>::from(64u8));
-    ///
-    /// ```
-    ///
-    /// # Panic
-    ///
-    /// This function will panic if `value` is not representable by this type
-    pub fn new(value: usize) -> Self {
-        assert!(value <= Self::MAX.0 && value >= Self::MIN.0);
-        unsafe { Self::new_unchecked(value) }
-    }
-
-    pub const fn try_new(value: usize) -> Option<Self> {
-        if value <= Self::MAX.0 && value >= Self::MIN.0 {
-            Some(unsafe { Self::new_unchecked(value) })
-        } else {
-            None
-        }
-    }
-}
-
-impl<const N: usize> Unsigned<N> {
-    /// Wrapping (modular) subtraction. Computes `self - other`,
-    /// wrapping around at the boundary of the type.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// use ux::*;
-    ///
-    /// assert_eq!(i5::MIN.wrapping_sub(i5::new(1)), i5::MAX);
-    ///
-    /// assert_eq!(i5::new(-10).wrapping_sub(i5::new(5)), i5::new(-15));
-    /// assert_eq!(i5::new(-15).wrapping_sub(i5::new(5)), i5::new(12));
-    /// ```
-    pub fn wrapping_sub(self, rhs: Self) -> Self {
-        Self(self.0.wrapping_sub(rhs.0)).mask()
-    }
-
-    /// Wrapping (modular) addition. Computes `self + other`,
-    /// wrapping around at the boundary of the type.
-    ///
-    /// # Examples
-    ///
-    /// Basic usage:
-    ///
-    /// ```
-    /// use ux::*;
-    ///
-    /// assert_eq!(i5::MAX.wrapping_add(i5::new(1)), i5::MIN);
-    ///
-    /// assert_eq!(i5::new(10).wrapping_add(i5::new(5)), i5::new(15));
-    /// assert_eq!(i5::new(15).wrapping_add(i5::new(5)), i5::new(-12));
-    /// ```
-    pub fn wrapping_add(self, rhs: Self) -> Self {
-        Self(self.0.wrapping_add(rhs.0)).mask()
-    }
-}
-
-impl<T, const N: usize> Shl<T> for Unsigned<N>
-where
-    usize: Shl<T, Output=usize>
-{
-    type Output = Self;
-
-    fn shl(self, rhs: T) -> Self {
-        Self(self.mask().0.shl(rhs))
-    }
-}
-
-impl<T, const N: usize> ShlAssign<T> for Unsigned<N>
-where
-    usize: ShlAssign<T>
-{
-    fn shl_assign(&mut self, rhs: T) {
-        *self = self.mask();
-        self.0.shl_assign(rhs);
-    }
-}
-
-impl<T, const N: usize> Shr<T> for Unsigned<N>
-where
-    usize: Shr<T, Output=usize>
-{
-    type Output = Self;
-
-    fn shr(self, rhs: T) -> Self {
-        Self(self.mask().0.shr(rhs))
-    }
-}
-
-impl<T, const N: usize> ShrAssign<T> for Unsigned<N>
-where
-    usize: ShrAssign<T>
-{
-    fn shr_assign(&mut self, rhs: T) {
-        *self = self.mask();
-        self.0.shr_assign(rhs);
-    }
-}
-
-impl<const N: usize> BitOr<Unsigned<N>> for Unsigned<N> {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.mask().0.bitor(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitOr<&'a Unsigned<N>> for Unsigned<N> {
-    type Output = <Self as BitOr<Self>>::Output;
-
-    fn bitor(self, rhs: &'a Unsigned<N>) -> Self::Output {
-        Self(self.mask().0.bitor(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitOr<Unsigned<N>> for &'a Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitor(self, rhs: Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitor(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitOr<&'a Unsigned<N>> for &'a Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Unsigned(self.mask().0.bitor(rhs.mask().0))
-    }
-}
-
-impl<const N: usize> BitOrAssign<Unsigned<N>> for Unsigned<N> {
-    fn bitor_assign(&mut self, other: Unsigned<N>) {
-        *self = self.mask();
-        self.0.bitor_assign(other.mask().0)
-    }
-}
-
-impl<const N: usize> BitXor<Unsigned<N>> for Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitxor(self, rhs: Unsigned<N>) -> Self::Output {
-        Self(self.mask().0.bitxor(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitXor<&'a Unsigned<N>> for Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitxor(self, rhs: &'a Unsigned<N>) -> Self::Output {
-        Self(self.mask().0.bitxor(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitXor<Unsigned<N>> for &'a Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitxor(self, rhs: Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitxor(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitXor<&'a Unsigned<N>> for &'a Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitxor(self, rhs: &'a Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitxor(rhs.mask().0))
-    }
-}
-
-impl<const N: usize> BitXorAssign<Unsigned<N>> for Unsigned<N> {
-    fn bitxor_assign(&mut self, other: Unsigned<N>) {
-        *self = self.mask();
-        self.0.bitxor_assign(other.mask().0)
-    }
-}
-
-impl<const N: usize> Not for Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn not(self) -> Unsigned<N> {
-        Unsigned(self.mask().0.not())
-    }
-}
-
-impl<'a, const N: usize> Not for &'a Unsigned<N> {
-    type Output = <Unsigned<N> as Not>::Output;
-
-    fn not(self) -> Unsigned<N> {
-        Unsigned(self.mask().0.not())
-    }
-}
-
-impl<const N: usize> BitAnd<Unsigned<N>> for Unsigned<N> {
-    type Output = Unsigned<N>;
-
-    fn bitand(self, rhs: Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitand(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitAnd<&'a Unsigned<N>> for Unsigned<N> {
-    type Output = <Unsigned<N> as BitOr<Unsigned<N>>>::Output;
-
-    fn bitand(self, rhs: &'a Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitand(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitAnd<Unsigned<N>> for &'a Unsigned<N> {
-    type Output = <Unsigned<N> as BitOr<Unsigned<N>>>::Output;
-
-    fn bitand(self, rhs: Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitand(rhs.mask().0))
-    }
-}
-
-impl<'a, const N: usize> BitAnd<&'a Unsigned<N>> for &'a Unsigned<N> {
-    type Output = <Unsigned<N> as BitOr<Unsigned<N>>>::Output;
-
-    fn bitand(self, rhs: &'a Unsigned<N>) -> Self::Output {
-        Unsigned(self.mask().0.bitand(rhs.mask().0))
-    }
-}
-
-impl<const N: usize> BitAndAssign<Unsigned<N>> for Unsigned<N> {
-    fn bitand_assign(&mut self, other: Unsigned<N>) {
-        *self = self.mask();
-        self.0.bitand_assign(other.mask().0)
-    }
-}
-
-impl<const N: usize> lib::core::ops::Add<Unsigned<N>> for Unsigned<N> {
-    type Output = Unsigned<N>;
-    #[allow(unused_comparisons)]
-    fn add(self, other: Unsigned<N>) -> Unsigned<N> {
-        if self.0 > 0 && other.0 > 0 {
-            debug_assert!(Self::MAX.0 - other.0 >= self.0);
-        } else if self.0 < 0 && other.0 < 0 {
-            debug_assert!(Self::MIN.0 - other.0 <= self.0);
-        }
-        self.wrapping_add(other)
-    }
-}
-
-impl<const N: usize> lib::core::ops::Sub<Unsigned<N>> for Unsigned<N> {
-    type Output = Unsigned<N>;
-    #[allow(unused_comparisons)]
-    fn sub(self, other: Unsigned<N>) -> Unsigned<N> {
-        if self > other {
-            debug_assert!(Self::MAX.0 + other.0 >= self.0);
-        } else if self < other {
-            debug_assert!(Self::MIN.0 + other.0 <= self.0);
-        }
-        self.wrapping_sub(other)
+impl<const N: usize, T> Signed<N, T> {
+    pub const unsafe fn new_unchecked(value: T) -> Self {
+        Self(value)
     }
 }
 
 ///The 1-bit unsigned integer type.
-pub type u1 = Unsigned<1>;
+pub type u1 = Unsigned<1, u8>;
 ///The 2-bit unsigned integer type.
-pub type u2 = Unsigned<2>;
+pub type u2 = Unsigned<2, u8>;
 ///The 3-bit unsigned integer type.
-pub type u3 = Unsigned<3>;
+pub type u3 = Unsigned<3, u8>;
 ///The 4-bit unsigned integer type.
-pub type u4 = Unsigned<4>;
+pub type u4 = Unsigned<4, u8>;
 ///The 5-bit unsigned integer type.
-pub type u5 = Unsigned<5>;
+pub type u5 = Unsigned<5, u8>;
 ///The 6-bit unsigned integer type.
-pub type u6 = Unsigned<6>;
+pub type u6 = Unsigned<6, u8>;
 ///The 7-bit unsigned integer type.
-pub type u7 = Unsigned<7>;
+pub type u7 = Unsigned<7, u8>;
 
 ///The 9-bit unsigned integer type.
-pub type u9 = Unsigned<9>;
+pub type u9 = Unsigned<9, u16>;
 ///The 10-bit unsigned integer type.
-pub type u10 = Unsigned<10>;
+pub type u10 = Unsigned<10, u16>;
 ///The 11-bit unsigned integer type.
-pub type u11 = Unsigned<11>;
+pub type u11 = Unsigned<11, u16>;
 ///The 12-bit unsigned integer type.
-pub type u12 = Unsigned<12>;
+pub type u12 = Unsigned<12, u16>;
 ///The 13-bit unsigned integer type.
-pub type u13 = Unsigned<13>;
+pub type u13 = Unsigned<13, u16>;
 ///The 14-bit unsigned integer type.
-pub type u14 = Unsigned<14>;
+pub type u14 = Unsigned<14, u16>;
 ///The 15-bit unsigned integer type.
-pub type u15 = Unsigned<15>;
+pub type u15 = Unsigned<15, u16>;
 
 ///The 17-bit unsigned integer type.
-pub type u17 = Unsigned<17>;
+pub type u17 = Unsigned<17, u32>;
 ///The 18-bit unsigned integer type.
-pub type u18 = Unsigned<18>;
+pub type u18 = Unsigned<18, u32>;
 ///The 19-bit unsigned integer type.
-pub type u19 = Unsigned<19>;
+pub type u19 = Unsigned<19, u32>;
 ///The 20-bit unsigned integer type.
-pub type u20 = Unsigned<20>;
+pub type u20 = Unsigned<20, u32>;
 ///The 21-bit unsigned integer type.
-pub type u21 = Unsigned<21>;
+pub type u21 = Unsigned<21, u32>;
 ///The 22-bit unsigned integer type.
-pub type u22 = Unsigned<22>;
+pub type u22 = Unsigned<22, u32>;
 ///The 23-bit unsigned integer type.
-pub type u23 = Unsigned<23>;
+pub type u23 = Unsigned<23, u32>;
 ///The 24-bit unsigned integer type.
-pub type u24 = Unsigned<24>;
+pub type u24 = Unsigned<24, u32>;
 ///The 25-bit unsigned integer type.
-pub type u25 = Unsigned<25>;
+pub type u25 = Unsigned<25, u32>;
 ///The 26-bit unsigned integer type.
-pub type u26 = Unsigned<26>;
+pub type u26 = Unsigned<26, u32>;
 ///The 27-bit unsigned integer type.
-pub type u27 = Unsigned<27>;
+pub type u27 = Unsigned<27, u32>;
 ///The 28-bit unsigned integer type.
-pub type u28 = Unsigned<28>;
+pub type u28 = Unsigned<28, u32>;
 ///The 29-bit unsigned integer type.
-pub type u29 = Unsigned<29>;
+pub type u29 = Unsigned<29, u32>;
 ///The 30-bit unsigned integer type.
-pub type u30 = Unsigned<30>;
+pub type u30 = Unsigned<30, u32>;
 ///The 31-bit unsigned integer type.
-pub type u31 = Unsigned<31>;
+pub type u31 = Unsigned<31, u32>;
 
 ///The 33-bit unsigned integer type.
-pub type u33 = Unsigned<33>;
+pub type u33 = Unsigned<33, u64>;
 ///The 34-bit unsigned integer type.
-pub type u34 = Unsigned<34>;
+pub type u34 = Unsigned<34, u64>;
 ///The 35-bit unsigned integer type.
-pub type u35 = Unsigned<35>;
+pub type u35 = Unsigned<35, u64>;
 ///The 36-bit unsigned integer type.
-pub type u36 = Unsigned<36>;
+pub type u36 = Unsigned<36, u64>;
 ///The 37-bit unsigned integer type.
-pub type u37 = Unsigned<37>;
+pub type u37 = Unsigned<37, u64>;
 ///The 38-bit unsigned integer type.
-pub type u38 = Unsigned<38>;
+pub type u38 = Unsigned<38, u64>;
 ///The 39-bit unsigned integer type.
-pub type u39 = Unsigned<39>;
+pub type u39 = Unsigned<39, u64>;
 ///The 40-bit unsigned integer type.
-pub type u40 = Unsigned<40>;
+pub type u40 = Unsigned<40, u64>;
 ///The 41-bit unsigned integer type.
-pub type u41 = Unsigned<41>;
+pub type u41 = Unsigned<41, u64>;
 ///The 42-bit unsigned integer type.
-pub type u42 = Unsigned<42>;
+pub type u42 = Unsigned<42, u64>;
 ///The 43-bit unsigned integer type.
-pub type u43 = Unsigned<43>;
+pub type u43 = Unsigned<43, u64>;
 ///The 44-bit unsigned integer type.
-pub type u44 = Unsigned<44>;
+pub type u44 = Unsigned<44, u64>;
 ///The 45-bit unsigned integer type.
-pub type u45 = Unsigned<45>;
+pub type u45 = Unsigned<45, u64>;
 ///The 46-bit unsigned integer type.
-pub type u46 = Unsigned<46>;
+pub type u46 = Unsigned<46, u64>;
 ///The 47-bit unsigned integer type.
-pub type u47 = Unsigned<47>;
+pub type u47 = Unsigned<47, u64>;
 ///The 48-bit unsigned integer type.
-pub type u48 = Unsigned<48>;
+pub type u48 = Unsigned<48, u64>;
 ///The 49-bit unsigned integer type.
-pub type u49 = Unsigned<49>;
+pub type u49 = Unsigned<49, u64>;
 ///The 50-bit unsigned integer type.
-pub type u50 = Unsigned<50>;
+pub type u50 = Unsigned<50, u64>;
 ///The 51-bit unsigned integer type.
-pub type u51 = Unsigned<51>;
+pub type u51 = Unsigned<51, u64>;
 ///The 52-bit unsigned integer type.
-pub type u52 = Unsigned<52>;
+pub type u52 = Unsigned<52, u64>;
 ///The 53-bit unsigned integer type.
-pub type u53 = Unsigned<53>;
+pub type u53 = Unsigned<53, u64>;
 ///The 54-bit unsigned integer type.
-pub type u54 = Unsigned<54>;
+pub type u54 = Unsigned<54, u64>;
 ///The 55-bit unsigned integer type.
-pub type u55 = Unsigned<55>;
+pub type u55 = Unsigned<55, u64>;
 ///The 56-bit unsigned integer type.
-pub type u56 = Unsigned<56>;
+pub type u56 = Unsigned<56, u64>;
 ///The 57-bit unsigned integer type.
-pub type u57 = Unsigned<57>;
+pub type u57 = Unsigned<57, u64>;
 ///The 58-bit unsigned integer type.
-pub type u58 = Unsigned<58>;
+pub type u58 = Unsigned<58, u64>;
 ///The 59-bit unsigned integer type.
-pub type u59 = Unsigned<59>;
+pub type u59 = Unsigned<59, u64>;
 ///The 60-bit unsigned integer type.
-pub type u60 = Unsigned<60>;
+pub type u60 = Unsigned<60, u64>;
 ///The 61-bit unsigned integer type.
-pub type u61 = Unsigned<61>;
+pub type u61 = Unsigned<61, u64>;
 ///The 62-bit unsigned integer type.
-pub type u62 = Unsigned<62>;
+pub type u62 = Unsigned<62, u64>;
 ///The 63-bit unsigned integer type.
-pub type u63 = Unsigned<63>;
-
-//define_unsigned!(#[doc="The 1-bit unsigned integer type."], u1, 1, u8);
-//define_unsigned!(#[doc="The 2-bit unsigned integer type."], u2, 2, u8);
-//define_unsigned!(#[doc="The 3-bit unsigned integer type."], u3, 3, u8);
-//define_unsigned!(#[doc="The 4-bit unsigned integer type."], u4, 4, u8);
-//define_unsigned!(#[doc="The 5-bit unsigned integer type."], u5, 5, u8);
-//define_unsigned!(#[doc="The 6-bit unsigned integer type."], u6, 6, u8);
-//define_unsigned!(#[doc="The 7-bit unsigned integer type."], u7, 7, u8);
-
-//define_unsigned!(#[doc="The 9-bit unsigned integer type."], u9, 9, u16);
-//define_unsigned!(#[doc="The 10-bit unsigned integer type."], u10, 10, u16);
-//define_unsigned!(#[doc="The 11-bit unsigned integer type."], u11, 11, u16);
-//define_unsigned!(#[doc="The 12-bit unsigned integer type."], u12, 12, u16);
-//define_unsigned!(#[doc="The 13-bit unsigned integer type."], u13, 13, u16);
-//define_unsigned!(#[doc="The 14-bit unsigned integer type."], u14, 14, u16);
-//define_unsigned!(#[doc="The 15-bit unsigned integer type."], u15, 15, u16);
-
-//define_unsigned!(#[doc="The 17-bit unsigned integer type."], u17, 17, u32);
-//define_unsigned!(#[doc="The 18-bit unsigned integer type."], u18, 18, u32);
-//define_unsigned!(#[doc="The 19-bit unsigned integer type."], u19, 19, u32);
-//define_unsigned!(#[doc="The 20-bit unsigned integer type."], u20, 20, u32);
-//define_unsigned!(#[doc="The 21-bit unsigned integer type."], u21, 21, u32);
-//define_unsigned!(#[doc="The 22-bit unsigned integer type."], u22, 22, u32);
-//define_unsigned!(#[doc="The 23-bit unsigned integer type."], u23, 23, u32);
-//define_unsigned!(#[doc="The 24-bit unsigned integer type."], u24, 24, u32);
-
-//define_unsigned!(#[doc="The 25-bit unsigned integer type."], u25, 25, u32);
-//define_unsigned!(#[doc="The 26-bit unsigned integer type."], u26, 26, u32);
-//define_unsigned!(#[doc="The 27-bit unsigned integer type."], u27, 27, u32);
-//define_unsigned!(#[doc="The 28-bit unsigned integer type."], u28, 28, u32);
-//define_unsigned!(#[doc="The 29-bit unsigned integer type."], u29, 29, u32);
-//define_unsigned!(#[doc="The 30-bit unsigned integer type."], u30, 30, u32);
-//define_unsigned!(#[doc="The 31-bit unsigned integer type."], u31, 31, u32);
-
-//define_unsigned!(#[doc="The 33-bit unsigned integer type."], u33, 33, u64);
-//define_unsigned!(#[doc="The 34-bit unsigned integer type."], u34, 34, u64);
-//define_unsigned!(#[doc="The 35-bit unsigned integer type."], u35, 35, u64);
-//define_unsigned!(#[doc="The 36-bit unsigned integer type."], u36, 36, u64);
-//define_unsigned!(#[doc="The 37-bit unsigned integer type."], u37, 37, u64);
-//define_unsigned!(#[doc="The 38-bit unsigned integer type."], u38, 38, u64);
-//define_unsigned!(#[doc="The 39-bit unsigned integer type."], u39, 39, u64);
-//define_unsigned!(#[doc="The 40-bit unsigned integer type."], u40, 40, u64);
-
-//define_unsigned!(#[doc="The 41-bit unsigned integer type."], u41, 41, u64);
-//define_unsigned!(#[doc="The 42-bit unsigned integer type."], u42, 42, u64);
-//define_unsigned!(#[doc="The 43-bit unsigned integer type."], u43, 43, u64);
-//define_unsigned!(#[doc="The 44-bit unsigned integer type."], u44, 44, u64);
-//define_unsigned!(#[doc="The 45-bit unsigned integer type."], u45, 45, u64);
-//define_unsigned!(#[doc="The 46-bit unsigned integer type."], u46, 46, u64);
-//define_unsigned!(#[doc="The 47-bit unsigned integer type."], u47, 47, u64);
-//define_unsigned!(#[doc="The 48-bit unsigned integer type."], u48, 48, u64);
-
-//define_unsigned!(#[doc="The 49-bit unsigned integer type."], u49, 49, u64);
-//define_unsigned!(#[doc="The 50-bit unsigned integer type."], u50, 50, u64);
-//define_unsigned!(#[doc="The 51-bit unsigned integer type."], u51, 51, u64);
-//define_unsigned!(#[doc="The 52-bit unsigned integer type."], u52, 52, u64);
-//define_unsigned!(#[doc="The 53-bit unsigned integer type."], u53, 53, u64);
-//define_unsigned!(#[doc="The 54-bit unsigned integer type."], u54, 54, u64);
-//define_unsigned!(#[doc="The 55-bit unsigned integer type."], u55, 55, u64);
-//define_unsigned!(#[doc="The 56-bit unsigned integer type."], u56, 56, u64);
-
-//define_unsigned!(#[doc="The 57-bit unsigned integer type."], u57, 57, u64);
-//define_unsigned!(#[doc="The 58-bit unsigned integer type."], u58, 58, u64);
-//define_unsigned!(#[doc="The 59-bit unsigned integer type."], u59, 59, u64);
-//define_unsigned!(#[doc="The 60-bit unsigned integer type."], u60, 60, u64);
-//define_unsigned!(#[doc="The 61-bit unsigned integer type."], u61, 61, u64);
-//define_unsigned!(#[doc="The 62-bit unsigned integer type."], u62, 62, u64);
-//define_unsigned!(#[doc="The 63-bit unsigned integer type."], u63, 63, u64);
-
-//define_unsigned!(#[doc="The 65-bit unsigned integer type."], u65, 65, u128);
-//define_unsigned!(#[doc="The 66-bit unsigned integer type."], u66, 66, u128);
-//define_unsigned!(#[doc="The 67-bit unsigned integer type."], u67, 67, u128);
-//define_unsigned!(#[doc="The 68-bit unsigned integer type."], u68, 68, u128);
-//define_unsigned!(#[doc="The 69-bit unsigned integer type."], u69, 69, u128);
-//define_unsigned!(#[doc="The 70-bit unsigned integer type."], u70, 70, u128);
-//define_unsigned!(#[doc="The 71-bit unsigned integer type."], u71, 71, u128);
-//define_unsigned!(#[doc="The 72-bit unsigned integer type."], u72, 72, u128);
-
-//define_unsigned!(#[doc="The 73-bit unsigned integer type."], u73, 73, u128);
-//define_unsigned!(#[doc="The 74-bit unsigned integer type."], u74, 74, u128);
-//define_unsigned!(#[doc="The 75-bit unsigned integer type."], u75, 75, u128);
-//define_unsigned!(#[doc="The 76-bit unsigned integer type."], u76, 76, u128);
-//define_unsigned!(#[doc="The 77-bit unsigned integer type."], u77, 77, u128);
-//define_unsigned!(#[doc="The 78-bit unsigned integer type."], u78, 78, u128);
-//define_unsigned!(#[doc="The 79-bit unsigned integer type."], u79, 79, u128);
-//define_unsigned!(#[doc="The 80-bit unsigned integer type."], u80, 80, u128);
-
-//define_unsigned!(#[doc="The 81-bit unsigned integer type."], u81, 81, u128);
-//define_unsigned!(#[doc="The 82-bit unsigned integer type."], u82, 82, u128);
-//define_unsigned!(#[doc="The 83-bit unsigned integer type."], u83, 83, u128);
-//define_unsigned!(#[doc="The 84-bit unsigned integer type."], u84, 84, u128);
-//define_unsigned!(#[doc="The 85-bit unsigned integer type."], u85, 85, u128);
-//define_unsigned!(#[doc="The 86-bit unsigned integer type."], u86, 86, u128);
-//define_unsigned!(#[doc="The 87-bit unsigned integer type."], u87, 87, u128);
-//define_unsigned!(#[doc="The 88-bit unsigned integer type."], u88, 88, u128);
-
-//define_unsigned!(#[doc="The 89-bit unsigned integer type."], u89, 89, u128);
-//define_unsigned!(#[doc="The 90-bit unsigned integer type."], u90, 90, u128);
-//define_unsigned!(#[doc="The 91-bit unsigned integer type."], u91, 91, u128);
-//define_unsigned!(#[doc="The 92-bit unsigned integer type."], u92, 92, u128);
-//define_unsigned!(#[doc="The 93-bit unsigned integer type."], u93, 93, u128);
-//define_unsigned!(#[doc="The 94-bit unsigned integer type."], u94, 94, u128);
-//define_unsigned!(#[doc="The 95-bit unsigned integer type."], u95, 95, u128);
-//define_unsigned!(#[doc="The 96-bit unsigned integer type."], u96, 96, u128);
-
-//define_unsigned!(#[doc="The 97-bit unsigned integer type."], u97, 97, u128);
-//define_unsigned!(#[doc="The 98-bit unsigned integer type."], u98, 98, u128);
-//define_unsigned!(#[doc="The 99-bit unsigned integer type."], u99, 99, u128);
-//define_unsigned!(#[doc="The 100-bit unsigned integer type."], u100, 100, u128);
-//define_unsigned!(#[doc="The 101-bit unsigned integer type."], u101, 101, u128);
-//define_unsigned!(#[doc="The 102-bit unsigned integer type."], u102, 102, u128);
-//define_unsigned!(#[doc="The 103-bit unsigned integer type."], u103, 103, u128);
-//define_unsigned!(#[doc="The 104-bit unsigned integer type."], u104, 104, u128);
-
-//define_unsigned!(#[doc="The 105-bit unsigned integer type."], u105, 105, u128);
-//define_unsigned!(#[doc="The 106-bit unsigned integer type."], u106, 106, u128);
-//define_unsigned!(#[doc="The 107-bit unsigned integer type."], u107, 107, u128);
-//define_unsigned!(#[doc="The 108-bit unsigned integer type."], u108, 108, u128);
-//define_unsigned!(#[doc="The 109-bit unsigned integer type."], u109, 109, u128);
-//define_unsigned!(#[doc="The 110-bit unsigned integer type."], u110, 110, u128);
-//define_unsigned!(#[doc="The 111-bit unsigned integer type."], u111, 111, u128);
-//define_unsigned!(#[doc="The 112-bit unsigned integer type."], u112, 112, u128);
-
-//define_unsigned!(#[doc="The 113-bit unsigned integer type."], u113, 113, u128);
-//define_unsigned!(#[doc="The 114-bit unsigned integer type."], u114, 114, u128);
-//define_unsigned!(#[doc="The 115-bit unsigned integer type."], u115, 115, u128);
-//define_unsigned!(#[doc="The 116-bit unsigned integer type."], u116, 116, u128);
-//define_unsigned!(#[doc="The 117-bit unsigned integer type."], u117, 117, u128);
-//define_unsigned!(#[doc="The 118-bit unsigned integer type."], u118, 118, u128);
-//define_unsigned!(#[doc="The 119-bit unsigned integer type."], u119, 119, u128);
-//define_unsigned!(#[doc="The 120-bit unsigned integer type."], u120, 120, u128);
-
-//define_unsigned!(#[doc="The 121-bit unsigned integer type."], u121, 121, u128);
-//define_unsigned!(#[doc="The 122-bit unsigned integer type."], u122, 122, u128);
-//define_unsigned!(#[doc="The 123-bit unsigned integer type."], u123, 123, u128);
-//define_unsigned!(#[doc="The 124-bit unsigned integer type."], u124, 124, u128);
-//define_unsigned!(#[doc="The 125-bit unsigned integer type."], u125, 125, u128);
-//define_unsigned!(#[doc="The 126-bit unsigned integer type."], u126, 126, u128);
-//define_unsigned!(#[doc="The 127-bit unsigned integer type."], u127, 127, u128);
-
-
-//define_signed!(#[doc="The 1-bit signed integer type."], i1, 1, i8);
-//define_signed!(#[doc="The 2-bit signed integer type."], i2, 2, i8);
-//define_signed!(#[doc="The 3-bit signed integer type."], i3, 3, i8);
-//define_signed!(#[doc="The 4-bit signed integer type."], i4, 4, i8);
-//define_signed!(#[doc="The 5-bit signed integer type."], i5, 5, i8);
-//define_signed!(#[doc="The 6-bit signed integer type."], i6, 6, i8);
-//define_signed!(#[doc="The 7-bit signed integer type."], i7, 7, i8);
-
-//define_signed!(#[doc="The 9-bit signed integer type."], i9, 9, i16);
-//define_signed!(#[doc="The 10-bit signed integer type."], i10, 10, i16);
-//define_signed!(#[doc="The 11-bit signed integer type."], i11, 11, i16);
-//define_signed!(#[doc="The 12-bit signed integer type."], i12, 12, i16);
-//define_signed!(#[doc="The 13-bit signed integer type."], i13, 13, i16);
-//define_signed!(#[doc="The 14-bit signed integer type."], i14, 14, i16);
-//define_signed!(#[doc="The 15-bit signed integer type."], i15, 15, i16);
-
-//define_signed!(#[doc="The 17-bit signed integer type."], i17, 17, i32);
-//define_signed!(#[doc="The 18-bit signed integer type."], i18, 18, i32);
-//define_signed!(#[doc="The 19-bit signed integer type."], i19, 19, i32);
-//define_signed!(#[doc="The 20-bit signed integer type."], i20, 20, i32);
-//define_signed!(#[doc="The 21-bit signed integer type."], i21, 21, i32);
-//define_signed!(#[doc="The 22-bit signed integer type."], i22, 22, i32);
-//define_signed!(#[doc="The 23-bit signed integer type."], i23, 23, i32);
-//define_signed!(#[doc="The 24-bit signed integer type."], i24, 24, i32);
-
-//define_signed!(#[doc="The 25-bit signed integer type."], i25, 25, i32);
-//define_signed!(#[doc="The 26-bit signed integer type."], i26, 26, i32);
-//define_signed!(#[doc="The 27-bit signed integer type."], i27, 27, i32);
-//define_signed!(#[doc="The 28-bit signed integer type."], i28, 28, i32);
-//define_signed!(#[doc="The 29-bit signed integer type."], i29, 29, i32);
-//define_signed!(#[doc="The 30-bit signed integer type."], i30, 30, i32);
-//define_signed!(#[doc="The 31-bit signed integer type."], i31, 31, i32);
-
-//define_signed!(#[doc="The 33-bit signed integer type."], i33, 33, i64);
-//define_signed!(#[doc="The 34-bit signed integer type."], i34, 34, i64);
-//define_signed!(#[doc="The 35-bit signed integer type."], i35, 35, i64);
-//define_signed!(#[doc="The 36-bit signed integer type."], i36, 36, i64);
-//define_signed!(#[doc="The 37-bit signed integer type."], i37, 37, i64);
-//define_signed!(#[doc="The 38-bit signed integer type."], i38, 38, i64);
-//define_signed!(#[doc="The 39-bit signed integer type."], i39, 39, i64);
-//define_signed!(#[doc="The 40-bit signed integer type."], i40, 40, i64);
-
-//define_signed!(#[doc="The 41-bit signed integer type."], i41, 41, i64);
-//define_signed!(#[doc="The 42-bit signed integer type."], i42, 42, i64);
-//define_signed!(#[doc="The 43-bit signed integer type."], i43, 43, i64);
-//define_signed!(#[doc="The 44-bit signed integer type."], i44, 44, i64);
-//define_signed!(#[doc="The 45-bit signed integer type."], i45, 45, i64);
-//define_signed!(#[doc="The 46-bit signed integer type."], i46, 46, i64);
-//define_signed!(#[doc="The 47-bit signed integer type."], i47, 47, i64);
-//define_signed!(#[doc="The 48-bit signed integer type."], i48, 48, i64);
-
-//define_signed!(#[doc="The 49-bit signed integer type."], i49, 49, i64);
-//define_signed!(#[doc="The 50-bit signed integer type."], i50, 50, i64);
-//define_signed!(#[doc="The 51-bit signed integer type."], i51, 51, i64);
-//define_signed!(#[doc="The 52-bit signed integer type."], i52, 52, i64);
-//define_signed!(#[doc="The 53-bit signed integer type."], i53, 53, i64);
-//define_signed!(#[doc="The 54-bit signed integer type."], i54, 54, i64);
-//define_signed!(#[doc="The 55-bit signed integer type."], i55, 55, i64);
-//define_signed!(#[doc="The 56-bit signed integer type."], i56, 56, i64);
-
-//define_signed!(#[doc="The 57-bit signed integer type."], i57, 57, i64);
-//define_signed!(#[doc="The 58-bit signed integer type."], i58, 58, i64);
-//define_signed!(#[doc="The 59-bit signed integer type."], i59, 59, i64);
-//define_signed!(#[doc="The 60-bit signed integer type."], i60, 60, i64);
-//define_signed!(#[doc="The 61-bit signed integer type."], i61, 61, i64);
-//define_signed!(#[doc="The 62-bit signed integer type."], i62, 62, i64);
-//define_signed!(#[doc="The 63-bit signed integer type."], i63, 63, i64);
-
-//define_signed!(#[doc="The 65-bit signed integer type."], i65, 65, i128);
-//define_signed!(#[doc="The 66-bit signed integer type."], i66, 66, i128);
-//define_signed!(#[doc="The 67-bit signed integer type."], i67, 67, i128);
-//define_signed!(#[doc="The 68-bit signed integer type."], i68, 68, i128);
-//define_signed!(#[doc="The 69-bit signed integer type."], i69, 69, i128);
-//define_signed!(#[doc="The 70-bit signed integer type."], i70, 70, i128);
-//define_signed!(#[doc="The 71-bit signed integer type."], i71, 71, i128);
-//define_signed!(#[doc="The 72-bit signed integer type."], i72, 72, i128);
-
-//define_signed!(#[doc="The 73-bit signed integer type."], i73, 73, i128);
-//define_signed!(#[doc="The 74-bit signed integer type."], i74, 74, i128);
-//define_signed!(#[doc="The 75-bit signed integer type."], i75, 75, i128);
-//define_signed!(#[doc="The 76-bit signed integer type."], i76, 76, i128);
-//define_signed!(#[doc="The 77-bit signed integer type."], i77, 77, i128);
-//define_signed!(#[doc="The 78-bit signed integer type."], i78, 78, i128);
-//define_signed!(#[doc="The 79-bit signed integer type."], i79, 79, i128);
-//define_signed!(#[doc="The 80-bit signed integer type."], i80, 80, i128);
-
-//define_signed!(#[doc="The 81-bit signed integer type."], i81, 81, i128);
-//define_signed!(#[doc="The 82-bit signed integer type."], i82, 82, i128);
-//define_signed!(#[doc="The 83-bit signed integer type."], i83, 83, i128);
-//define_signed!(#[doc="The 84-bit signed integer type."], i84, 84, i128);
-//define_signed!(#[doc="The 85-bit signed integer type."], i85, 85, i128);
-//define_signed!(#[doc="The 86-bit signed integer type."], i86, 86, i128);
-//define_signed!(#[doc="The 87-bit signed integer type."], i87, 87, i128);
-//define_signed!(#[doc="The 88-bit signed integer type."], i88, 88, i128);
-
-//define_signed!(#[doc="The 89-bit signed integer type."], i89, 89, i128);
-//define_signed!(#[doc="The 90-bit signed integer type."], i90, 90, i128);
-//define_signed!(#[doc="The 91-bit signed integer type."], i91, 91, i128);
-//define_signed!(#[doc="The 92-bit signed integer type."], i92, 92, i128);
-//define_signed!(#[doc="The 93-bit signed integer type."], i93, 93, i128);
-//define_signed!(#[doc="The 94-bit signed integer type."], i94, 94, i128);
-//define_signed!(#[doc="The 95-bit signed integer type."], i95, 95, i128);
-//define_signed!(#[doc="The 96-bit signed integer type."], i96, 96, i128);
-
-//define_signed!(#[doc="The 97-bit signed integer type."], i97, 97, i128);
-//define_signed!(#[doc="The 98-bit signed integer type."], i98, 98, i128);
-//define_signed!(#[doc="The 99-bit signed integer type."], i99, 99, i128);
-//define_signed!(#[doc="The 100-bit signed integer type."], i100, 100, i128);
-//define_signed!(#[doc="The 101-bit signed integer type."], i101, 101, i128);
-//define_signed!(#[doc="The 102-bit signed integer type."], i102, 102, i128);
-//define_signed!(#[doc="The 103-bit signed integer type."], i103, 103, i128);
-//define_signed!(#[doc="The 104-bit signed integer type."], i104, 104, i128);
-
-//define_signed!(#[doc="The 105-bit signed integer type."], i105, 105, i128);
-//define_signed!(#[doc="The 106-bit signed integer type."], i106, 106, i128);
-//define_signed!(#[doc="The 107-bit signed integer type."], i107, 107, i128);
-//define_signed!(#[doc="The 108-bit signed integer type."], i108, 108, i128);
-//define_signed!(#[doc="The 109-bit signed integer type."], i109, 109, i128);
-//define_signed!(#[doc="The 110-bit signed integer type."], i110, 110, i128);
-//define_signed!(#[doc="The 111-bit signed integer type."], i111, 111, i128);
-//define_signed!(#[doc="The 112-bit signed integer type."], i112, 112, i128);
-
-//define_signed!(#[doc="The 113-bit signed integer type."], i113, 113, i128);
-//define_signed!(#[doc="The 114-bit signed integer type."], i114, 114, i128);
-//define_signed!(#[doc="The 115-bit signed integer type."], i115, 115, i128);
-//define_signed!(#[doc="The 116-bit signed integer type."], i116, 116, i128);
-//define_signed!(#[doc="The 117-bit signed integer type."], i117, 117, i128);
-//define_signed!(#[doc="The 118-bit signed integer type."], i118, 118, i128);
-//define_signed!(#[doc="The 119-bit signed integer type."], i119, 119, i128);
-//define_signed!(#[doc="The 120-bit signed integer type."], i120, 120, i128);
-
-//define_signed!(#[doc="The 121-bit signed integer type."], i121, 121, i128);
-//define_signed!(#[doc="The 122-bit signed integer type."], i122, 122, i128);
-//define_signed!(#[doc="The 123-bit signed integer type."], i123, 123, i128);
-//define_signed!(#[doc="The 124-bit signed integer type."], i124, 124, i128);
-//define_signed!(#[doc="The 125-bit signed integer type."], i125, 125, i128);
-//define_signed!(#[doc="The 126-bit signed integer type."], i126, 126, i128);
-//define_signed!(#[doc="The 127-bit signed integer type."], i127, 127, i128);
-
-
-//#[cfg(test)]
-//mod tests {
-    //use super::*;
-
-    //#[test]
-    //fn test_masking() {
-        //assert_eq!(u4(0b11000110).mask().0, 0b00000110);
-        //assert_eq!(u4(0b00001000).mask().0, 0b00001000);
-        //assert_eq!(u4(0b00001110).mask().0, 0b00001110);
-
-        //assert_eq!(i4(0b11000110u8 as i8).mask().0, 0b00000110u8 as i8);
-        //assert_eq!(i4(0b00001000u8 as i8).mask().0, 0b11111000u8 as i8);
-        //assert_eq!(i4(0b00001110u8 as i8).mask().0, 0b11111110u8 as i8);
-
-    //}
-
-    //#[test]
-    //fn min_max_values() {
-        //assert_eq!(u1::MAX, u1(1));
-        //assert_eq!(u2::MAX, u2(3));
-        //assert_eq!(u3::MAX, u3(7));
-        //assert_eq!(u7::MAX, u7(127));
-        //assert_eq!(u9::MAX, u9(511));
-
-
-        //assert_eq!(i1::MAX, i1(0));
-        //assert_eq!(i2::MAX, i2(1));
-        //assert_eq!(i3::MAX, i3(3));
-        //assert_eq!(i7::MAX, i7(63));
-        //assert_eq!(i9::MAX, i9(255));
-
-
-        //assert_eq!(u1::MIN, u1(0));
-        //assert_eq!(u2::MIN, u2(0));
-        //assert_eq!(u3::MIN, u3(0));
-        //assert_eq!(u7::MIN, u7(0));
-        //assert_eq!(u9::MIN, u9(0));
-        //assert_eq!(u127::MIN, u127(0));
-
-
-        //assert_eq!(i1::MIN, i1(-1));
-        //assert_eq!(i2::MIN, i2(-2));
-        //assert_eq!(i3::MIN, i3(-4));
-        //assert_eq!(i7::MIN, i7(-64));
-        //assert_eq!(i9::MIN, i9(-256));
-
-
-    //}
-
-    //#[test]
-    //fn test_wrapping_add() {
-        //assert_eq!(u1::MAX.wrapping_add(u1(1)), u1(0));
-        //assert_eq!(u1::MAX.wrapping_add(u1(0)), u1(1));
-
-        //assert_eq!(u5::MAX.wrapping_add(u5(1)), u5(0));
-        //assert_eq!(u5::MAX.wrapping_add(u5(4)), u5(3));
-
-        //assert_eq!(u127::MAX.wrapping_add(u127(100)), u127(99));
-        //assert_eq!(u127::MAX.wrapping_add(u127(1)), u127(0));
-
-        //assert_eq!(i1::MAX.wrapping_add(i1(0)), i1(0));
-        //assert_eq!(i1::MAX.wrapping_add(i1(-1)), i1(-1));
-
-        //assert_eq!(i7::MAX.wrapping_add(i7(1)), i7::MIN);
-        //assert_eq!(i7::MAX.wrapping_add(i7(4)), i7(-61));
-    //}
-
-    //#[test]
-    //#[should_panic]
-    //fn test_add_overflow_u5() {
-        //let _s = u5::MAX + u5(1);
-    //}
-
-    //#[test]
-    //#[should_panic]
-    //fn test_add_overflow_u127() { let _s = u127::MAX + u127(1); }
-
-    //#[test]
-    //#[should_panic]
-    //fn test_add_overflow_i96() { let _s = i96::MAX + i96(100); }
-
-    //#[test]
-    //#[should_panic]
-    //fn test_add_underflow_i96() { let _s = i96::MIN + i96(-100); }
-
-    //#[test]
-    //#[should_panic]
-    //fn test_add_underflow_i17() {
-        //let _s = i17::MIN + i17(-1);
-    //}
-
-    //#[test]
-    //fn test_add() {
-        //assert_eq!(u5(1) + u5(2), u5(3));
-
-        //assert_eq!(i7::MAX + i7::MIN, i7(-1));
-        //assert_eq!(i7(4) + i7(-3), i7(1));
-        //assert_eq!(i7(-4) + i7(3), i7(-1));
-        //assert_eq!(i7(-3) + i7(-20), i7(-23));
-    //}
-
-    //#[test]
-    //#[should_panic]
-    //fn test_sub_overflow_i23() {
-        //let _s = i23::MIN - i23::MAX;
-    //}
-
-    //#[test]
-    //#[should_panic]
-    //fn test_sub_underflow_u5() {
-        //let _s = u5::MIN - u5(1);
-    //}
-
-    //#[test]
-    //#[should_panic]
-    //fn test_sub_underflow_i5() {
-        //let _s = i5::MIN - i5(1);
-    //}
-
-    //#[test]
-    //fn test_sub() {
-        //assert_eq!(u5(1) - u5(1), u5(0));
-        //assert_eq!(u5(3) - u5(2), u5(1));
-
-        //assert_eq!(i1(-1) - i1(-1) , i1(0));
-        //assert_eq!(i7::MIN - i7::MIN , i7(0));
-        //assert_eq!(i7(4) - i7(-3), i7(7));
-        //assert_eq!(i7(-4) - i7(3), i7(-7));
-        //assert_eq!(i7(-3) - i7(-20), i7(17));
-    //}
-
-    //#[test]
-    //fn test_shr() {
-        //assert_eq!(u5(8) >> 1usize, u5(4));
-        //assert_eq!(u5(8) >> 1u8, u5(4));
-        //assert_eq!(u5(8) >> 1u16, u5(4));
-        //assert_eq!(u5(8) >> 1u32, u5(4));
-        //assert_eq!(u5(8) >> 1u64, u5(4));
-        //assert_eq!(u5(8) >> 1isize, u5(4));
-        //assert_eq!(u5(8) >> 1i8, u5(4));
-        //assert_eq!(u5(8) >> 1i16, u5(4));
-        //assert_eq!(u5(8) >> 1i32, u5(4));
-        //assert_eq!(u5(8) >> 1i64, u5(4));
-
-        //assert_eq!(u5::MAX >> 4, u5(1));
-
-        //assert_eq!(i7(-1) >> 5, i7(-1));
-    //}
-
-    //#[test]
-    //fn test_shl() {
-        //assert_eq!(u5(16) << 1usize, u5(32));
-        //assert_eq!(u5(16) << 1u8, u5(32));
-        //assert_eq!(u5(16) << 1u16, u5(32));
-        //assert_eq!(u5(16) << 1u32, u5(32));
-        //assert_eq!(u5(16) << 1u64, u5(32));
-        //assert_eq!(u5(16) << 1isize, u5(32));
-        //assert_eq!(u5(16) << 1i8, u5(32));
-        //assert_eq!(u5(16) << 1i16, u5(32));
-        //assert_eq!(u5(16) << 1i32, u5(32));
-        //assert_eq!(u5(16) << 1i64, u5(32));
-
-        //assert_eq!(u5::MAX << 4, u5(16));
-
-        //assert_eq!(i5(16) << 1, i5(0));
-        //assert_eq!(i7(1) << 3, i7(8));
-    //}
-
-    //#[test]
-    //fn test_shr_assign() {
-        //let mut x = u10(512);
-        //x >>= 1usize;
-        //assert_eq!(x, u10(256));
-        //x >>= 1isize;
-        //assert_eq!(x, u10(128));
-        //x >>= 1u8;
-        //assert_eq!(x, u10(64));
-        //x >>= 1i8;
-        //assert_eq!(x, u10(32));
-        //x >>= 2u64;
-        //assert_eq!(x, u10(8));
-        //x >>= 3i32;
-        //assert_eq!(x, u10(1));
-    //}
-
-    //#[test]
-    //fn test_shl_assign() {
-        //let mut x = u9(1);
-        //x <<= 3i32;
-        //assert_eq!(x, u9(8));
-        //x <<= 2u64;
-        //assert_eq!(x, u9(32));
-        //x <<= 1usize;
-        //assert_eq!(x, u9(64));
-        //x <<= 1isize;
-        //assert_eq!(x, u9(128));
-        //x <<= 1u8;
-        //assert_eq!(x, u9(256));
-    //}
-
-    //#[test]
-    //fn test_bitor() {
-        //assert_eq!(u9(1) | u9(8), u9(9));
-        //assert_eq!(&u9(1) | u9(8), u9(9));
-        //assert_eq!(u9(1) | &u9(8), u9(9));
-        //assert_eq!(&u9(1) | &u9(8), u9(9));
-    //}
-
-    //#[test]
-    //fn test_bitor_assign() {
-        //let mut x = u12(4);
-        //x |= u12(1);
-        //assert_eq!(x, u12(5));
-        //x |= u12(128);
-        //assert_eq!(x, u12(133));
-        //x = u12(1);
-        //x |= u12(127);
-        //assert_eq!(x, u12(127));
-    //}
-
-    //#[test]
-    //fn test_bitxor() {
-        //assert_eq!(u7(0x7F) ^ u7(42), u7(85));
-        //assert_eq!(&u7(0) ^ u7(42), u7(42));
-        //assert_eq!(u7(0x10) ^ &u7(0x1), u7(0x11));
-        //assert_eq!(&u7(11) ^ &u7(1), u7(10));
-    //}
-
-    //#[test]
-    //fn test_bitxor_assign() {
-        //let mut x = u12(4);
-        //x ^= u12(1);
-        //assert_eq!(x, u12(5));
-        //x ^= u12(128);
-        //assert_eq!(x, u12(133));
-        //x ^= u12(1);
-        //assert_eq!(x, u12(132));
-        //x ^= u12(127);
-        //assert_eq!(x, u12(251));
-    //}
-
-    //#[test]
-    //fn test_bitand() {
-        //assert_eq!(i9(-7) & i9(-9), i9::from(-7i8 & -9i8));
-        //assert_eq!(&i9(-7) & i9(-9), i9::from(&-7i8 & -9i8));
-        //assert_eq!(i9(-7) & &i9(-9), i9::from(-7i8 & &-9i8));
-        //assert_eq!(&i9(-7) & &i9(-9), i9::from(&-7i8 & &-9i8));
-
-        //assert_eq!(u9(8) & u9(9), u9(8));
-        //assert_eq!(&u9(8) & u9(9), u9(8));
-        //assert_eq!(u9(8) & &u9(9), u9(8));
-        //assert_eq!(&u9(8) & &u9(9), u9(8));
-    //}
-
-    //#[test]
-    //fn test_bitand_assign() {
-        //let mut x = u12(255);
-        //x &= u12(127);
-        //assert_eq!(x, u12(127));
-        //x &= u12(7);
-        //assert_eq!(x, u12(7));
-        //x &= u12(127);
-        //assert_eq!(x, u12(7));
-        //x &= u12(4);
-        //assert_eq!(x, u12(4));
-    //}
-
-    //#[test]
-    //fn test_not() {
-        //assert_eq!(!u7(42), u7(85));
-        //assert_eq!(!u7(0x7F), u7(0));
-        //assert_eq!(!u7(0), u7(0x7F));
-        //assert_eq!(!u7(56), u7(71));
-    //}
-
-//}
+pub type u63 = Unsigned<63, u64>;
+
+///The 65-bit unsigned integer type.
+pub type u65 = Unsigned<65, u128>;
+///The 66-bit unsigned integer type.
+pub type u66 = Unsigned<66, u128>;
+///The 67-bit unsigned integer type.
+pub type u67 = Unsigned<67, u128>;
+///The 68-bit unsigned integer type.
+pub type u68 = Unsigned<68, u128>;
+///The 69-bit unsigned integer type.
+pub type u69 = Unsigned<69, u128>;
+///The 70-bit unsigned integer type.
+pub type u70 = Unsigned<70, u128>;
+///The 71-bit unsigned integer type.
+pub type u71 = Unsigned<71, u128>;
+///The 72-bit unsigned integer type.
+pub type u72 = Unsigned<72, u128>;
+///The 73-bit unsigned integer type.
+pub type u73 = Unsigned<73, u128>;
+///The 74-bit unsigned integer type.
+pub type u74 = Unsigned<74, u128>;
+///The 75-bit unsigned integer type.
+pub type u75 = Unsigned<75, u128>;
+///The 76-bit unsigned integer type.
+pub type u76 = Unsigned<76, u128>;
+///The 77-bit unsigned integer type.
+pub type u77 = Unsigned<77, u128>;
+///The 78-bit unsigned integer type.
+pub type u78 = Unsigned<78, u128>;
+///The 79-bit unsigned integer type.
+pub type u79 = Unsigned<79, u128>;
+///The 80-bit unsigned integer type.
+pub type u80 = Unsigned<80, u128>;
+///The 81-bit unsigned integer type.
+pub type u81 = Unsigned<81, u128>;
+///The 82-bit unsigned integer type.
+pub type u82 = Unsigned<82, u128>;
+///The 83-bit unsigned integer type.
+pub type u83 = Unsigned<83, u128>;
+///The 84-bit unsigned integer type.
+pub type u84 = Unsigned<84, u128>;
+///The 85-bit unsigned integer type.
+pub type u85 = Unsigned<85, u128>;
+///The 86-bit unsigned integer type.
+pub type u86 = Unsigned<86, u128>;
+///The 87-bit unsigned integer type.
+pub type u87 = Unsigned<87, u128>;
+///The 88-bit unsigned integer type.
+pub type u88 = Unsigned<88, u128>;
+///The 89-bit unsigned integer type.
+pub type u89 = Unsigned<89, u128>;
+///The 90-bit unsigned integer type.
+pub type u90 = Unsigned<90, u128>;
+///The 91-bit unsigned integer type.
+pub type u91 = Unsigned<91, u128>;
+///The 92-bit unsigned integer type.
+pub type u92 = Unsigned<92, u128>;
+///The 93-bit unsigned integer type.
+pub type u93 = Unsigned<93, u128>;
+///The 94-bit unsigned integer type.
+pub type u94 = Unsigned<94, u128>;
+///The 95-bit unsigned integer type.
+pub type u95 = Unsigned<95, u128>;
+///The 96-bit unsigned integer type.
+pub type u96 = Unsigned<96, u128>;
+///The 97-bit unsigned integer type.
+pub type u97 = Unsigned<97, u128>;
+///The 98-bit unsigned integer type.
+pub type u98 = Unsigned<98, u128>;
+///The 99-bit unsigned integer type.
+pub type u99 = Unsigned<99, u128>;
+///The 100-bit unsigned integer type.
+pub type u100 = Unsigned<100, u128>;
+///The 101-bit unsigned integer type.
+pub type u101 = Unsigned<101, u128>;
+///The 102-bit unsigned integer type.
+pub type u102 = Unsigned<102, u128>;
+///The 103-bit unsigned integer type.
+pub type u103 = Unsigned<103, u128>;
+///The 104-bit unsigned integer type.
+pub type u104 = Unsigned<104, u128>;
+///The 105-bit unsigned integer type.
+pub type u105 = Unsigned<105, u128>;
+///The 106-bit unsigned integer type.
+pub type u106 = Unsigned<106, u128>;
+///The 107-bit unsigned integer type.
+pub type u107 = Unsigned<107, u128>;
+///The 108-bit unsigned integer type.
+pub type u108 = Unsigned<108, u128>;
+///The 109-bit unsigned integer type.
+pub type u109 = Unsigned<109, u128>;
+///The 110-bit unsigned integer type.
+pub type u110 = Unsigned<110, u128>;
+///The 111-bit unsigned integer type.
+pub type u111 = Unsigned<111, u128>;
+///The 112-bit unsigned integer type.
+pub type u112 = Unsigned<112, u128>;
+///The 113-bit unsigned integer type.
+pub type u113 = Unsigned<113, u128>;
+///The 114-bit unsigned integer type.
+pub type u114 = Unsigned<114, u128>;
+///The 115-bit unsigned integer type.
+pub type u115 = Unsigned<115, u128>;
+///The 116-bit unsigned integer type.
+pub type u116 = Unsigned<116, u128>;
+///The 117-bit unsigned integer type.
+pub type u117 = Unsigned<117, u128>;
+///The 118-bit unsigned integer type.
+pub type u118 = Unsigned<118, u128>;
+///The 119-bit unsigned integer type.
+pub type u119 = Unsigned<119, u128>;
+///The 120-bit unsigned integer type.
+pub type u120 = Unsigned<120, u128>;
+///The 121-bit unsigned integer type.
+pub type u121 = Unsigned<121, u128>;
+///The 122-bit unsigned integer type.
+pub type u122 = Unsigned<122, u128>;
+///The 123-bit unsigned integer type.
+pub type u123 = Unsigned<123, u128>;
+///The 124-bit unsigned integer type.
+pub type u124 = Unsigned<124, u128>;
+///The 125-bit unsigned integer type.
+pub type u125 = Unsigned<125, u128>;
+///The 126-bit unsigned integer type.
+pub type u126 = Unsigned<126, u128>;
+///The 127-bit unsigned integer type.
+pub type u127 = Unsigned<127, u128>;
+
+
+///The 1-bit signed integer type.
+pub type i1 = Signed<1, i8>;
+///The 2-bit signed integer type.
+pub type i2 = Signed<2, i8>;
+///The 3-bit signed integer type.
+pub type i3 = Signed<3, i8>;
+///The 4-bit signed integer type.
+pub type i4 = Signed<4, i8>;
+///The 5-bit signed integer type.
+pub type i5 = Signed<5, i8>;
+///The 6-bit signed integer type.
+pub type i6 = Signed<6, i8>;
+///The 7-bit signed integer type.
+pub type i7 = Signed<7, i8>;
+
+///The 9-bit signed integer type.
+pub type i9 = Signed<9, i16>;
+///The 10-bit signed integer type.
+pub type i10 = Signed<10, i16>;
+///The 11-bit signed integer type.
+pub type i11 = Signed<11, i16>;
+///The 12-bit signed integer type.
+pub type i12 = Signed<12, i16>;
+///The 13-bit signed integer type.
+pub type i13 = Signed<13, i16>;
+///The 14-bit signed integer type.
+pub type i14 = Signed<14, i16>;
+///The 15-bit signed integer type.
+pub type i15 = Signed<15, i16>;
+
+///The 17-bit signed integer type.
+pub type i17 = Signed<17, i32>;
+///The 18-bit signed integer type.
+pub type i18 = Signed<18, i32>;
+///The 19-bit signed integer type.
+pub type i19 = Signed<19, i32>;
+///The 20-bit signed integer type.
+pub type i20 = Signed<20, i32>;
+///The 21-bit signed integer type.
+pub type i21 = Signed<21, i32>;
+///The 22-bit signed integer type.
+pub type i22 = Signed<22, i32>;
+///The 23-bit signed integer type.
+pub type i23 = Signed<23, i32>;
+///The 24-bit signed integer type.
+pub type i24 = Signed<24, i32>;
+///The 25-bit signed integer type.
+pub type i25 = Signed<25, i32>;
+///The 26-bit signed integer type.
+pub type i26 = Signed<26, i32>;
+///The 27-bit signed integer type.
+pub type i27 = Signed<27, i32>;
+///The 28-bit signed integer type.
+pub type i28 = Signed<28, i32>;
+///The 29-bit signed integer type.
+pub type i29 = Signed<29, i32>;
+///The 30-bit signed integer type.
+pub type i30 = Signed<30, i32>;
+///The 31-bit signed integer type.
+pub type i31 = Signed<31, i32>;
+
+///The 33-bit signed integer type.
+pub type i33 = Signed<33, i64>;
+///The 34-bit signed integer type.
+pub type i34 = Signed<34, i64>;
+///The 35-bit signed integer type.
+pub type i35 = Signed<35, i64>;
+///The 36-bit signed integer type.
+pub type i36 = Signed<36, i64>;
+///The 37-bit signed integer type.
+pub type i37 = Signed<37, i64>;
+///The 38-bit signed integer type.
+pub type i38 = Signed<38, i64>;
+///The 39-bit signed integer type.
+pub type i39 = Signed<39, i64>;
+///The 40-bit signed integer type.
+pub type i40 = Signed<40, i64>;
+///The 41-bit signed integer type.
+pub type i41 = Signed<41, i64>;
+///The 42-bit signed integer type.
+pub type i42 = Signed<42, i64>;
+///The 43-bit signed integer type.
+pub type i43 = Signed<43, i64>;
+///The 44-bit signed integer type.
+pub type i44 = Signed<44, i64>;
+///The 45-bit signed integer type.
+pub type i45 = Signed<45, i64>;
+///The 46-bit signed integer type.
+pub type i46 = Signed<46, i64>;
+///The 47-bit signed integer type.
+pub type i47 = Signed<47, i64>;
+///The 48-bit signed integer type.
+pub type i48 = Signed<48, i64>;
+///The 49-bit signed integer type.
+pub type i49 = Signed<49, i64>;
+///The 50-bit signed integer type.
+pub type i50 = Signed<50, i64>;
+///The 51-bit signed integer type.
+pub type i51 = Signed<51, i64>;
+///The 52-bit signed integer type.
+pub type i52 = Signed<52, i64>;
+///The 53-bit signed integer type.
+pub type i53 = Signed<53, i64>;
+///The 54-bit signed integer type.
+pub type i54 = Signed<54, i64>;
+///The 55-bit signed integer type.
+pub type i55 = Signed<55, i64>;
+///The 56-bit signed integer type.
+pub type i56 = Signed<56, i64>;
+///The 57-bit signed integer type.
+pub type i57 = Signed<57, i64>;
+///The 58-bit signed integer type.
+pub type i58 = Signed<58, i64>;
+///The 59-bit signed integer type.
+pub type i59 = Signed<59, i64>;
+///The 60-bit signed integer type.
+pub type i60 = Signed<60, i64>;
+///The 61-bit signed integer type.
+pub type i61 = Signed<61, i64>;
+///The 62-bit signed integer type.
+pub type i62 = Signed<62, i64>;
+///The 63-bit signed integer type.
+pub type i63 = Signed<63, i64>;
+
+///The 65-bit signed integer type.
+pub type i65 = Signed<65, i128>;
+///The 66-bit signed integer type.
+pub type i66 = Signed<66, i128>;
+///The 67-bit signed integer type.
+pub type i67 = Signed<67, i128>;
+///The 68-bit signed integer type.
+pub type i68 = Signed<68, i128>;
+///The 69-bit signed integer type.
+pub type i69 = Signed<69, i128>;
+///The 70-bit signed integer type.
+pub type i70 = Signed<70, i128>;
+///The 71-bit signed integer type.
+pub type i71 = Signed<71, i128>;
+///The 72-bit signed integer type.
+pub type i72 = Signed<72, i128>;
+///The 73-bit signed integer type.
+pub type i73 = Signed<73, i128>;
+///The 74-bit signed integer type.
+pub type i74 = Signed<74, i128>;
+///The 75-bit signed integer type.
+pub type i75 = Signed<75, i128>;
+///The 76-bit signed integer type.
+pub type i76 = Signed<76, i128>;
+///The 77-bit signed integer type.
+pub type i77 = Signed<77, i128>;
+///The 78-bit signed integer type.
+pub type i78 = Signed<78, i128>;
+///The 79-bit signed integer type.
+pub type i79 = Signed<79, i128>;
+///The 80-bit signed integer type.
+pub type i80 = Signed<80, i128>;
+///The 81-bit signed integer type.
+pub type i81 = Signed<81, i128>;
+///The 82-bit signed integer type.
+pub type i82 = Signed<82, i128>;
+///The 83-bit signed integer type.
+pub type i83 = Signed<83, i128>;
+///The 84-bit signed integer type.
+pub type i84 = Signed<84, i128>;
+///The 85-bit signed integer type.
+pub type i85 = Signed<85, i128>;
+///The 86-bit signed integer type.
+pub type i86 = Signed<86, i128>;
+///The 87-bit signed integer type.
+pub type i87 = Signed<87, i128>;
+///The 88-bit signed integer type.
+pub type i88 = Signed<88, i128>;
+///The 89-bit signed integer type.
+pub type i89 = Signed<89, i128>;
+///The 90-bit signed integer type.
+pub type i90 = Signed<90, i128>;
+///The 91-bit signed integer type.
+pub type i91 = Signed<91, i128>;
+///The 92-bit signed integer type.
+pub type i92 = Signed<92, i128>;
+///The 93-bit signed integer type.
+pub type i93 = Signed<93, i128>;
+///The 94-bit signed integer type.
+pub type i94 = Signed<94, i128>;
+///The 95-bit signed integer type.
+pub type i95 = Signed<95, i128>;
+///The 96-bit signed integer type.
+pub type i96 = Signed<96, i128>;
+///The 97-bit signed integer type.
+pub type i97 = Signed<97, i128>;
+///The 98-bit signed integer type.
+pub type i98 = Signed<98, i128>;
+///The 99-bit signed integer type.
+pub type i99 = Signed<99, i128>;
+///The 100-bit signed integer type.
+pub type i100 = Signed<100, i128>;
+///The 101-bit signed integer type.
+pub type i101 = Signed<101, i128>;
+///The 102-bit signed integer type.
+pub type i102 = Signed<102, i128>;
+///The 103-bit signed integer type.
+pub type i103 = Signed<103, i128>;
+///The 104-bit signed integer type.
+pub type i104 = Signed<104, i128>;
+///The 105-bit signed integer type.
+pub type i105 = Signed<105, i128>;
+///The 106-bit signed integer type.
+pub type i106 = Signed<106, i128>;
+///The 107-bit signed integer type.
+pub type i107 = Signed<107, i128>;
+///The 108-bit signed integer type.
+pub type i108 = Signed<108, i128>;
+///The 109-bit signed integer type.
+pub type i109 = Signed<109, i128>;
+///The 110-bit signed integer type.
+pub type i110 = Signed<110, i128>;
+///The 111-bit signed integer type.
+pub type i111 = Signed<111, i128>;
+///The 112-bit signed integer type.
+pub type i112 = Signed<112, i128>;
+///The 113-bit signed integer type.
+pub type i113 = Signed<113, i128>;
+///The 114-bit signed integer type.
+pub type i114 = Signed<114, i128>;
+///The 115-bit signed integer type.
+pub type i115 = Signed<115, i128>;
+///The 116-bit signed integer type.
+pub type i116 = Signed<116, i128>;
+///The 117-bit signed integer type.
+pub type i117 = Signed<117, i128>;
+///The 118-bit signed integer type.
+pub type i118 = Signed<118, i128>;
+///The 119-bit signed integer type.
+pub type i119 = Signed<119, i128>;
+///The 120-bit signed integer type.
+pub type i120 = Signed<120, i128>;
+///The 121-bit signed integer type.
+pub type i121 = Signed<121, i128>;
+///The 122-bit signed integer type.
+pub type i122 = Signed<122, i128>;
+///The 123-bit signed integer type.
+pub type i123 = Signed<123, i128>;
+///The 124-bit signed integer type.
+pub type i124 = Signed<124, i128>;
+///The 125-bit signed integer type.
+pub type i125 = Signed<125, i128>;
+///The 126-bit signed integer type.
+pub type i126 = Signed<126, i128>;
+///The 127-bit signed integer type.
+pub type i127 = Signed<127, i128>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_masking() {
+        let new = |x| unsafe { u4::new_unchecked(x) };
+        let newi = |x| unsafe { i4::new_unchecked(x) };
+        assert_eq!(new(0b11000110).mask().0, 0b00000110);
+        assert_eq!(new(0b00001000).mask().0, 0b00001000);
+        assert_eq!(new(0b00001110).mask().0, 0b00001110);
+
+        assert_eq!(newi(0b11000110u8 as i8).mask().0, 0b00000110u8 as i8);
+        assert_eq!(newi(0b00001000u8 as i8).mask().0, 0b11111000u8 as i8);
+        assert_eq!(newi(0b00001110u8 as i8).mask().0, 0b11111110u8 as i8);
+
+    }
+
+    #[test]
+    fn min_max_values() {
+        //assert_eq!(u1::MAX, u1::new(1));
+        assert_eq!(u2::MAX, u2::new(3));
+        assert_eq!(u3::MAX, u3::new(7));
+        assert_eq!(u7::MAX, u7::new(127));
+        assert_eq!(u9::MAX, u9::new(511));
+
+
+        //assert_eq!(i1::MAX, i1::new(0));
+        assert_eq!(i2::MAX, i2::new(1));
+        assert_eq!(i3::MAX, i3::new(3));
+        assert_eq!(i7::MAX, i7::new(63));
+        assert_eq!(i9::MAX, i9::new(255));
+
+
+        assert_eq!(u1::MIN, u1::new(0));
+        assert_eq!(u2::MIN, u2::new(0));
+        assert_eq!(u3::MIN, u3::new(0));
+        assert_eq!(u7::MIN, u7::new(0));
+        assert_eq!(u9::MIN, u9::new(0));
+        assert_eq!(u127::MIN, u127::new(0));
+
+
+        assert_eq!(i1::MIN, i1::new(-1));
+        assert_eq!(i2::MIN, i2::new(-2));
+        assert_eq!(i3::MIN, i3::new(-4));
+        assert_eq!(i7::MIN, i7::new(-64));
+        assert_eq!(i9::MIN, i9::new(-256));
+
+
+    }
+
+    #[test]
+    fn test_wrapping_add() {
+        assert_eq!(u1::MAX.wrapping_add(u1::new(1)), u1::new(0));
+        assert_eq!(u1::MAX.wrapping_add(u1::new(0)), u1::new(1));
+
+        assert_eq!(u5::MAX.wrapping_add(u5::new(1)), u5::new(0));
+        assert_eq!(u5::MAX.wrapping_add(u5::new(4)), u5::new(3));
+
+        assert_eq!(u127::MAX.wrapping_add(u127::new(100)), u127::new(99));
+        assert_eq!(u127::MAX.wrapping_add(u127::new(1)), u127::new(0));
+
+        assert_eq!(i1::MAX.wrapping_add(i1::new(0)), i1::new(0));
+        assert_eq!(i1::MAX.wrapping_add(i1::new(-1)), i1::new(-1));
+
+        assert_eq!(i7::MAX.wrapping_add(i7::new(1)), i7::MIN);
+        assert_eq!(i7::MAX.wrapping_add(i7::new(4)), i7::new(-61));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_add_overflow_u5() {
+        let _s = u5::MAX + u5::new(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_add_overflow_u127() { let _s = u127::MAX + u127::new(1); }
+
+    #[test]
+    #[should_panic]
+    fn test_add_overflow_i96() { let _s = i96::MAX + i96::new(100); }
+
+    #[test]
+    #[should_panic]
+    fn test_add_underflow_i96() { let _s = i96::MIN + i96::new(-100); }
+
+    #[test]
+    #[should_panic]
+    fn test_add_underflow_i17() {
+        let _s = i17::MIN + i17::new(-1);
+    }
+
+    #[test]
+    fn test_add() {
+        assert_eq!(u5::new(1) + u5::new(2), u5::new(3));
+
+        assert_eq!(i7::MAX + i7::MIN, i7::new(-1));
+        assert_eq!(i7::new(4) + i7::new(-3), i7::new(1));
+        assert_eq!(i7::new(-4) + i7::new(3), i7::new(-1));
+        assert_eq!(i7::new(-3) + i7::new(-20), i7::new(-23));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_sub_overflow_i23() {
+        let _s = i23::MIN - i23::MAX;
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_sub_underflow_u5() {
+        let _s = u5::MIN - u5::new(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_sub_underflow_i5() {
+        let _s = i5::MIN - i5::new(1);
+    }
+
+    #[test]
+    fn test_sub() {
+        assert_eq!(u5::new(1) - u5::new(1), u5::new(0));
+        assert_eq!(u5::new(3) - u5::new(2), u5::new(1));
+
+        assert_eq!(i1::new(-1) - i1::new(-1) , i1::new(0));
+        assert_eq!(i7::MIN - i7::MIN , i7::new(0));
+        assert_eq!(i7::new(4) - i7::new(-3), i7::new(7));
+        assert_eq!(i7::new(-4) - i7::new(3), i7::new(-7));
+        assert_eq!(i7::new(-3) - i7::new(-20), i7::new(17));
+    }
+
+    #[test]
+    fn test_shr() {
+        assert_eq!(u5::new(8) >> 1usize, u5::new(4));
+        assert_eq!(u5::new(8) >> 1u8, u5::new(4));
+        assert_eq!(u5::new(8) >> 1u16, u5::new(4));
+        assert_eq!(u5::new(8) >> 1u32, u5::new(4));
+        assert_eq!(u5::new(8) >> 1u64, u5::new(4));
+        assert_eq!(u5::new(8) >> 1isize, u5::new(4));
+        assert_eq!(u5::new(8) >> 1i8, u5::new(4));
+        assert_eq!(u5::new(8) >> 1i16, u5::new(4));
+        assert_eq!(u5::new(8) >> 1i32, u5::new(4));
+        assert_eq!(u5::new(8) >> 1i64, u5::new(4));
+
+        assert_eq!(u5::MAX >> 4, u5::new(1));
+
+        assert_eq!(i7::new(-1) >> 5, i7::new(-1));
+    }
+
+    #[test]
+    fn test_shl() {
+        let new = |x| unsafe { u5::new_unchecked(x) };
+        let newi = |x| unsafe { i5::new_unchecked(x) };
+        let newi2 = |x| unsafe { i7::new_unchecked(x) };
+        assert_eq!(new(16) << 1usize, new(32));
+        assert_eq!(new(16) << 1u8, new(32));
+        assert_eq!(new(16) << 1u16, new(32));
+        assert_eq!(new(16) << 1u32, new(32));
+        assert_eq!(new(16) << 1u64, new(32));
+        assert_eq!(new(16) << 1isize, new(32));
+        assert_eq!(new(16) << 1i8, new(32));
+        assert_eq!(new(16) << 1i16, new(32));
+        assert_eq!(new(16) << 1i32, new(32));
+        assert_eq!(new(16) << 1i64, new(32));
+
+        assert_eq!(u5::MAX << 4, new(16));
+
+        assert_eq!(newi(16) << 1, newi(0));
+        assert_eq!(newi2(1) << 3, newi2(8));
+    }
+
+    #[test]
+    fn test_shr_assign() {
+        let mut x = u10::new(512);
+        x >>= 1usize;
+        assert_eq!(x, u10::new(256));
+        x >>= 1isize;
+        assert_eq!(x, u10::new(128));
+        x >>= 1u8;
+        assert_eq!(x, u10::new(64));
+        x >>= 1i8;
+        assert_eq!(x, u10::new(32));
+        x >>= 2u64;
+        assert_eq!(x, u10::new(8));
+        x >>= 3i32;
+        assert_eq!(x, u10::new(1));
+    }
+
+    #[test]
+    fn test_shl_assign() {
+        let mut x = u9::new(1);
+        x <<= 3i32;
+        assert_eq!(x, u9::new(8));
+        x <<= 2u64;
+        assert_eq!(x, u9::new(32));
+        x <<= 1usize;
+        assert_eq!(x, u9::new(64));
+        x <<= 1isize;
+        assert_eq!(x, u9::new(128));
+        x <<= 1u8;
+        assert_eq!(x, u9::new(256));
+    }
+
+    #[test]
+    fn test_bitor() {
+        assert_eq!(u9::new(1) | u9::new(8), u9::new(9));
+        assert_eq!(&u9::new(1) | u9::new(8), u9::new(9));
+        assert_eq!(u9::new(1) | &u9::new(8), u9::new(9));
+        assert_eq!(&u9::new(1) | &u9::new(8), u9::new(9));
+    }
+
+    #[test]
+    fn test_bitor_assign() {
+        let mut x = u12::new(4);
+        x |= u12::new(1);
+        assert_eq!(x, u12::new(5));
+        x |= u12::new(128);
+        assert_eq!(x, u12::new(133));
+        x = u12::new(1);
+        x |= u12::new(127);
+        assert_eq!(x, u12::new(127));
+    }
+
+    #[test]
+    fn test_bitxor() {
+        assert_eq!(u7::new(0x7F) ^ u7::new(42), u7::new(85));
+        assert_eq!(&u7::new(0) ^ u7::new(42), u7::new(42));
+        assert_eq!(u7::new(0x10) ^ &u7::new(0x1), u7::new(0x11));
+        assert_eq!(&u7::new(11) ^ &u7::new(1), u7::new(10));
+    }
+
+    #[test]
+    fn test_bitxor_assign() {
+        let mut x = u12::new(4);
+        x ^= u12::new(1);
+        assert_eq!(x, u12::new(5));
+        x ^= u12::new(128);
+        assert_eq!(x, u12::new(133));
+        x ^= u12::new(1);
+        assert_eq!(x, u12::new(132));
+        x ^= u12::new(127);
+        assert_eq!(x, u12::new(251));
+    }
+
+    #[test]
+    fn test_bitand() {
+        //assert_eq!(i9::new(-7) & i9::new(-9), i9::from(-7i8 & -9i8));
+        //assert_eq!(&i9::new(-7) & i9::new(-9), i9::from(&-7i8 & -9i8));
+        //assert_eq!(i9::new(-7) & &i9::new(-9), i9::from(-7i8 & &-9i8));
+        //assert_eq!(&i9::new(-7) & &i9::new(-9), i9::from(&-7i8 & &-9i8));
+
+        assert_eq!(u9::new(8) & u9::new(9), u9::new(8));
+        assert_eq!(&u9::new(8) & u9::new(9), u9::new(8));
+        assert_eq!(u9::new(8) & &u9::new(9), u9::new(8));
+        assert_eq!(&u9::new(8) & &u9::new(9), u9::new(8));
+    }
+
+    #[test]
+    fn test_bitand_assign() {
+        let mut x = u12::new(255);
+        x &= u12::new(127);
+        assert_eq!(x, u12::new(127));
+        x &= u12::new(7);
+        assert_eq!(x, u12::new(7));
+        x &= u12::new(127);
+        assert_eq!(x, u12::new(7));
+        x &= u12::new(4);
+        assert_eq!(x, u12::new(4));
+    }
+
+    #[test]
+    fn test_not() {
+        assert_eq!(!u7::new(42), u7::new(85));
+        assert_eq!(!u7::new(0x7F), u7::new(0));
+        assert_eq!(!u7::new(0), u7::new(0x7F));
+        assert_eq!(!u7::new(56), u7::new(71));
+    }
+}
